@@ -208,10 +208,12 @@ async def list_models():
         ]
     }
 
-import pymongo
+from pymongo import MongoClient
 
 # Connessione a MongoDB
-client_mongo = pymongo.MongoClient("mongodb://52.20.211.97:27117/")
+client_mongo = MongoClient(
+        "mongodb://diamond:eXpr1viAKCMct@52.20.211.97:27117/diamond?tls=false&authSource=diamond", 
+        serverSelectionTimeoutMS=5000)
 db = client_mongo["diamond"]
 collection = db["telemetries"]
 
