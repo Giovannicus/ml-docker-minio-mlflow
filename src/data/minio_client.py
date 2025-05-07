@@ -5,7 +5,7 @@ from minio import Minio
 from minio.error import S3Error
 from datetime import datetime
 
-from src.config import (
+from config import (
     MINIO_ENDPOINT,
     MINIO_ACCESS_KEY,
     MINIO_SECRET_KEY,

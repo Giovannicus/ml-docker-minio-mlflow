@@ -5,11 +5,11 @@ from pydantic import BaseModel
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
-from src.data.minio_client import MinioClient
-from src.data.data_processor import DataProcessor
-from src.model.mlflow_utils import MLflowManager
-from src.model.train import train_model
-from src.config import DATA_BUCKET, MODEL_NAME
+from data.minio_client import MinioClient
+from data.data_processor import DataProcessor
+from model.mlflow_utils import MLflowManager
+from model.train import train_model
+from config import DATA_BUCKET, MODEL_NAME
 
 app = FastAPI(
     title="ML Model API",
@@ -20,7 +20,7 @@ app = FastAPI(
 # Initialize clients
 minio_client = MinioClient()
 data_processor = DataProcessor()
-mlflow_manager = MLflowManager()
+#mlflow_manager = MLflowManager()
 
 class PredictionRequest(BaseModel):
     features: Dict[str, Any]
@@ -207,6 +207,43 @@ async def list_models():
             }
         ]
     }
+
+import pymongo
+
+# Connessione a MongoDB
+client_mongo = pymongo.MongoClient("mongodb://52.20.211.97:27117/")
+db = client_mongo["diamond"]
+collection = db["telemetries"]
+
+# Esempio di uso in un endpoint FastAPI
+@app.get("/get-telemetries")
+async def get_telemetries():
+    # Estrai i dati dalla collezione
+    data = list(collection.find({}))
+    return {"data": str(data)}
+
+@app.get("/view-data")
+async def view_data():
+    try:
+        # Estrai i dati (limita a 100 documenti per evitare sovraccarichi)
+        cursor = collection.find({}).limit(100)
+        
+        # Converti in lista di dizionari (più sicuro)
+        data_list = []
+        for doc in cursor:
+            # Converti ObjectId in stringhe
+            doc["_id"] = str(doc["_id"])
+            data_list.append(doc)
+        
+        # Restituisci i dati come risposta
+        return {"status": "success", "count": len(data_list), "data": data_list}
+    
+    except Exception as e:
+        # Gestione degli errori
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": str(e)}
+        )
 
 if __name__ == "__main__":
     import uvicorn

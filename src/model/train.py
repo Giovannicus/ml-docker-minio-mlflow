@@ -3,8 +3,8 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
-from src.data.data_processor import DataProcessor
-from src.model.mlflow_utils import MLflowManager
+from data.data_processor import DataProcessor
+from model.mlflow_utils import MLflowManager
 
 def train_model(data_object_name, target_column, time_column=None, start_time=None, end_time=None):
     """

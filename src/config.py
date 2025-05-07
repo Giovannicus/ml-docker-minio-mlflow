@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # MinIO configuration
-MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
+MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")#default minio
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minioadmin")
 MINIO_SECURE = os.getenv("MINIO_SECURE", "False").lower() == "true"
@@ -15,7 +15,7 @@ DATA_BUCKET = "data"
 MODEL_BUCKET = "models"
 
 # MLflow configuration
-MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
+MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")#default mlflow
 EXPERIMENT_NAME = "random-forest-model"
 
 # Model parameters

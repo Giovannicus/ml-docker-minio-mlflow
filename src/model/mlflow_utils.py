@@ -6,7 +6,7 @@ from mlflow.models.signature import infer_signature
 import skl2onnx
 import onnx
 
-from src.config import (
+from config import (
     MLFLOW_TRACKING_URI,
     EXPERIMENT_NAME,
     MODEL_NAME,
@@ -15,7 +15,7 @@ from src.config import (
     PARAMS_JSON_PATH,
     METRICS_JSON_PATH
 )
-from src.data.minio_client import MinioClient
+from data.minio_client import MinioClient
 
 class MLflowManager:
     """Utility class for managing MLflow experiments and models"""

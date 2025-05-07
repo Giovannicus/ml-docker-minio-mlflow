@@ -3,8 +3,8 @@ import json
 import pandas as pd
 from datetime import datetime, timedelta
 
-from src.data.minio_client import MinioClient
-from src.config import DATA_BUCKET
+from data.minio_client import MinioClient
+from config import DATA_BUCKET
 
 class DataProcessor:
     """Utility class for processing data from MinIO"""
