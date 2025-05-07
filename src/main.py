@@ -4,12 +4,20 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Body
 from pydantic import BaseModel
 from typing import Dict, List, Optional, Any
 from datetime import datetime
+from fastapi.responses import StreamingResponse
 
 from data.minio_client import MinioClient
 from data.data_processor import DataProcessor
 from model.mlflow_utils import MLflowManager
 from model.train import train_model
-from config import DATA_BUCKET, MODEL_NAME
+from config import DATA_BUCKET, MODEL_NAME, MODEL_BUCKET
+
+from sklearn.datasets import load_iris
+from datetime import datetime, timedelta
+from skl2onnx import convert_sklearn
+from skl2onnx.common.data_types import FloatTensorType
+from io import BytesIO
+
 
 app = FastAPI(
     title="ML Model API",
@@ -44,152 +52,6 @@ class PredictionResponse(BaseModel):
 async def root():
     """Root endpoint to check API status"""
     return {"message": "ML Model API is running", "status": "ok"}
-
-@app.post("/upload-data", response_model=DataUploadResponse)
-async def upload_historical_data(
-    file: UploadFile = File(...),
-    time_filter: Optional[TimeRangeFilter] = None
-):
-    """
-    Upload historical data in JSON format to MinIO
-    Optionally filter by time range before saving
-    """
-    try:
-        # Read JSON data from uploaded file
-        contents = await file.read()
-        json_data = json.loads(contents)
-        
-        # Convert to DataFrame
-        df = pd.DataFrame(json_data)
-        
-        # Apply time filtering if provided
-        if time_filter:
-            if time_filter.time_column not in df.columns:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Time column '{time_filter.time_column}' not found in data"
-                )
-            
-            df = data_processor.minio_client.filter_data_by_time_range(
-                df, 
-                time_filter.time_column,
-                time_filter.start_time,
-                time_filter.end_time
-            )
-        
-        # Save to MinIO with timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        object_name = f"historical_data_{timestamp}.json"
-        
-        success = minio_client.save_dataframe_to_minio(
-            df, 
-            DATA_BUCKET, 
-            object_name, 
-            format="json"
-        )
-        
-        if not success:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to save data to storage"
-            )
-        
-        return DataUploadResponse(
-            message="Data uploaded successfully",
-            object_name=object_name,
-            record_count=len(df)
-        )
-        
-    except json.JSONDecodeError:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid JSON format"
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error processing upload: {str(e)}"
-        )
-
-@app.post("/predict", response_model=PredictionResponse)
-async def predict(request: PredictionRequest):
-    """
-    Make predictions using the latest model version
-    """
-    try:
-        # Convert input features to DataFrame
-        features_df = pd.DataFrame([request.features])
-        
-        # Load the latest model
-        model = mlflow_manager.load_model()
-        
-        if model is None:
-            raise HTTPException(
-                status_code=404,
-                detail="Model not found. Please train a model first."
-            )
-        
-        # Make prediction
-        prediction = model.predict(features_df)[0]
-        
-        # Get confidence if available (for classifiers)
-        confidence = None
-        if hasattr(model, "predict_proba"):
-            try:
-                probas = model.predict_proba(features_df)[0]
-                confidence = float(max(probas))
-            except:
-                pass
-        
-        return PredictionResponse(
-            prediction=prediction,
-            confidence=confidence,
-            model_version="latest"
-        )
-    
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Prediction error: {str(e)}"
-        )
-
-@app.post("/train")
-async def train_new_model(
-    data_object: str = Body(..., embed=True),
-    target_column: str = Body(..., embed=True),
-    time_column: Optional[str] = Body(None, embed=True),
-    start_time: Optional[str] = Body(None, embed=True),
-    end_time: Optional[str] = Body(None, embed=True)
-):
-    """
-    Train a new model using data from MinIO
-    """
-    try:
-        model, metrics, run_id = train_model(
-            data_object,
-            target_column,
-            time_column=time_column,
-            start_time=start_time,
-            end_time=end_time
-        )
-        
-        if model is None:
-            raise HTTPException(
-                status_code=400,
-                detail="Failed to train model. Check logs for details."
-            )
-        
-        return {
-            "message": "Model trained successfully",
-            "run_id": run_id,
-            "metrics": metrics
-        }
-    
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Training error: {str(e)}"
-        )
 
 @app.get("/models")
 async def list_models():
@@ -246,6 +108,158 @@ async def view_data():
             status_code=500,
             content={"status": "error", "message": str(e)}
         )
+
+from fastapi import FastAPI, HTTPException, Body
+from typing import Optional
+from sklearn.datasets import load_iris
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+import pandas as pd
+from datetime import datetime, timedelta
+import uuid
+
+app = FastAPI()
+
+# Variabile globale per mantenere il dataset
+iris_df = None
+
+@app.post("/upload-iris")
+async def upload_iris():
+    global iris_df
+    iris = load_iris(as_frame=True)
+    df = iris.frame
+
+    iris_df = df.copy()
+
+    return {
+        "message": "Iris dataset caricato con successo",
+        "record_count": len(iris_df),
+        "first_rows": iris_df.head().to_dict(orient="records")
+    }
+
+@app.post("/train")
+async def train_new_model(
+    target_column: str = Body(..., embed=True),
+):
+    """
+    Allena un modello sul dataset Iris precedentemente caricato.
+    """
+    global iris_df
+
+    if iris_df is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Iris dataset non ancora caricato. Esegui prima /upload-iris."
+        )
+
+    try:
+        df = iris_df.copy()
+
+        # Verifica che la colonna target esista
+        if target_column not in df.columns:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Target column '{target_column}' not found in data"
+            )
+
+        # Separazione features e target
+        X = df.drop(columns=[target_column])
+        y = df[target_column]
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+        model = RandomForestClassifier()
+        model.fit(X_train, y_train)
+
+        # Conversione in ONNX
+        initial_type = [('float_input', FloatTensorType([None, X_train.shape[1]]))]
+        onnx_model = convert_sklearn(model, initial_types=initial_type)
+
+        # Salva il modello in memoria
+        onnx_bytes = onnx_model.SerializeToString()
+        run_id = str(uuid.uuid4())
+        model_object_name = f"model_{run_id}.onnx"
+
+        # Salva su MinIO
+        # Verifica se il bucket esiste prima di tentare di salvare
+        #if not minio_client.bucket_exists(MODEL_BUCKET):
+        #    raise HTTPException(status_code=404, detail=f"Bucket '{MODEL_BUCKET}' not found")
+
+        success = save_bytes_to_minio(MODEL_BUCKET, model_object_name, onnx_bytes)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save model to MinIO")
+
+        # Predizione
+        y_pred = model.predict(X_test)
+        accuracy = accuracy_score(y_test, y_pred)
+
+        return {
+            "message": "Model trained and saved as ONNX in MinIO",
+            "run_id": run_id,
+            "model_object": model_object_name,
+            "metrics": {
+                "accuracy": accuracy
+            }
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Training error: {str(e)}")
+
+
+from minio import Minio
+from minio.error import S3Error
+
+from io import BytesIO
+from fastapi import HTTPException
+
+def save_bytes_to_minio(bucket_name, object_name, data_bytes):
+    try:
+        # Se il bucket non esiste, crealo
+        minio_client._ensure_buckets_exist()
+        print(f"Bucket '{bucket_name}' created.")
+        
+        # Salva il modello come oggetto nel bucket MinIO
+        minio_client.client.put_object(bucket_name, object_name, BytesIO(data_bytes), len(data_bytes), content_type="application/octet-stream")
+
+        print(f"Model saved successfully to {bucket_name}/{object_name}")
+        return True
+    except Exception as e:
+        print(f"Error saving model to MinIO: {str(e)}")  # Log dell'errore
+        raise HTTPException(status_code=500, detail=f"Failed to save model: {str(e)}")
+
+@app.get("/help")
+async def Help():
+    # Ottieni la lista di metodi
+    minio_methods = dir(MinioClient)
+    methods_info = {}
+
+    for method in minio_methods:
+        method_obj = getattr(MinioClient, method, None)
+        if callable(method_obj):
+            methods_info[method] = method_obj.__doc__  # Ottieni la docstring del metodo
+
+    return {"methods_info": methods_info}
+
+
+
+@app.get("/download-model")
+async def download_model(bucket_name,object_name):
+    try:
+        # Verifica se il bucket esiste
+        #if not minio_client._ensure_buckets_exist():
+        #    raise HTTPException(status_code=404, detail="Bucket not found")
+
+        # Recupera il modello da MinIO
+        response = minio_client.client.get_object(bucket_name, object_name)
+        model_data = response.read()
+
+
+        # Restituisci il file come risposta HTTP
+        return StreamingResponse(BytesIO(model_data), media_type="application/octet-stream")
+    
+    except S3Error as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving model: {e}")
+
 
 if __name__ == "__main__":
     import uvicorn
